@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$RepoUrl,
+    [string]$RepoUrl = "https://github.com/MislavSag/options-scanner.git",
 
     [string]$Branch = "main",
     [string]$ResourceGroup = "rg-options-scanner",
@@ -13,7 +12,7 @@ param(
     [string]$SshPublicKeyPath = "$HOME/.ssh/id_rsa.pub",
     [switch]$GenerateSshKeys,
     [string]$TimerOnCalendar = "hourly",
-    [string]$PipelineArgs = "--container qc-backtest --skip-filter",
+    [string]$PipelineArgs = "--container qc-backtest",
     [switch]$RunPipelineAfterProvision
 )
 
@@ -31,7 +30,8 @@ function Convert-ToBashSingleQuoted {
     if ($null -eq $Value) {
         $Value = ""
     }
-    return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+    $escaped = $Value -replace "'", "'`"`'`"`'"
+    return "'$escaped'"
 }
 
 Assert-Command -Name "az"
@@ -45,6 +45,9 @@ if ($AdminUsername -notmatch "^[a-z_][a-z0-9_-]*$") {
 }
 if ($TimerOnCalendar -match "[\r\n]") {
     throw "TimerOnCalendar cannot contain newline characters."
+}
+if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
+    throw "RepoUrl cannot be empty."
 }
 
 Write-Host "Checking Azure login..."
@@ -133,16 +136,23 @@ write_files:
       pip install --upgrade pip
       pip install -r requirements.txt
 
+      if [[ "${PIPELINE_ARGS}" == *"--skip-filter"* ]]; then
+        mkdir -p data
+        if [ ! -f "data/stocks.csv" ] && [ -f "symbols.txt" ]; then
+          cp symbols.txt data/stocks.csv
+        fi
+      fi
+
+      exec 9>"${LOCK_FILE}"
+      if ! /usr/bin/flock -n 9; then
+        echo "Another pipeline run is active. Skipping this cycle."
+        exit 0
+      fi
+
       if [ -n "${PIPELINE_ARGS}" ]; then
-        /usr/bin/flock -n "${LOCK_FILE}" bash -lc ". .venv/bin/activate && python run_full_pipeline.py ${PIPELINE_ARGS}" || {
-          echo "Another pipeline run is active. Skipping this cycle."
-          exit 0
-        }
+        bash -lc ". .venv/bin/activate && python run_full_pipeline.py ${PIPELINE_ARGS}"
       else
-        /usr/bin/flock -n "${LOCK_FILE}" bash -lc ". .venv/bin/activate && python run_full_pipeline.py" || {
-          echo "Another pipeline run is active. Skipping this cycle."
-          exit 0
-        }
+        bash -lc ". .venv/bin/activate && python run_full_pipeline.py"
       fi
   - path: /etc/systemd/system/options-scanner.service
     owner: root:root
@@ -191,7 +201,8 @@ $cloudInit = $cloudInitTemplate.
     Replace("__RUN_PIPELINE_AFTER_PROVISION__", $runAfterProvision)
 
 $customDataPath = Join-Path -Path $env:TEMP -ChildPath "$VmName-cloud-init.yaml"
-Set-Content -Path $customDataPath -Value $cloudInit -Encoding utf8
+# Use ASCII to avoid UTF-8 BOM issues that can break cloud-init parsing.
+Set-Content -Path $customDataPath -Value $cloudInit -Encoding ascii
 
 try {
     Write-Host "Creating/updating resource group '$ResourceGroup' in '$Location'..."
@@ -209,6 +220,7 @@ try {
         "vm", "create",
         "--resource-group", $ResourceGroup,
         "--name", $VmName,
+        "--location", $Location,
         "--image", $Image,
         "--size", $VmSize,
         "--admin-username", $AdminUsername,

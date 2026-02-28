@@ -146,13 +146,15 @@ cp .env.example .env
 ```powershell
 az login
 .\azure\create_vm_and_install.ps1 `
-  -RepoUrl "https://github.com/<ORG>/<REPO>.git" `
+  -RepoUrl "https://github.com/MislavSag/options-scanner.git" `
   -ResourceGroup "rg-options-scanner" `
   -Location "eastus" `
   -VmName "vm-options-scanner" `
   -TimerOnCalendar "Mon..Fri *-*-* 15:35:00" `
-  -PipelineArgs "--container qc-backtest --skip-filter"
+  -PipelineArgs "--container qc-backtest"
 ```
+
+`-RepoUrl` je sada opcionalan; default je `https://github.com/MislavSag/options-scanner.git`.
 
 Skripta automatski:
 - kreira Resource Group
@@ -169,7 +171,7 @@ Napomena za repo:
 
 Timer i pipeline parametri (skripta):
 1. `-TimerOnCalendar`: systemd raspored. Default: `hourly`
-2. `-PipelineArgs`: argumenti za `run_full_pipeline.py`. Default: `--container qc-backtest --skip-filter`
+2. `-PipelineArgs`: argumenti za `run_full_pipeline.py`. Default: `--container qc-backtest`
 3. `-RunPipelineAfterProvision`: opcionalno odmah pokrene pipeline nakon prvog bootstrapa
 
 7. Pokretanje cijelog flowa:
@@ -177,10 +179,31 @@ Timer i pipeline parametri (skripta):
 python run_full_pipeline.py --container qc-backtest
 ```
 
-8. IBC (auto-start IB Gateway/TWS):
-- Repo: `https://github.com/IbcAlpha/IBC`
-- Radi na Linuxu i standardan je izbor za unattended IB automation
-- Tipicno se konfigurira kao `systemd` servis, pa se nakon restarta VM-a sve samo digne
+8. IB Gateway automation (Docker + IBC, preporuceno):
+```bash
+cd /opt/options-scanner
+sudo bash azure/setup_ib_gateway_docker.sh
+sudo nano /opt/ib-gateway/.env   # upisi TWS_USERID i TWS_PASSWORD
+sudo systemctl start ib-gateway-docker.service
+ss -ltnp | grep -E '4001|4002'
+```
+
+Fajlovi u repou:
+- `azure/ib-gateway/docker-compose.yml`
+- `azure/ib-gateway/.env.example`
+- `azure/setup_ib_gateway_docker.sh`
+
+Port map (localhost na VM-u):
+- `4002` paper
+- `4001` live
+
+Za paper setup u `config.yaml` postavi:
+- `tws.host: "127.0.0.1"`
+- `tws.port: 4002`
+
+Napomena:
+- Login user/pass se moze automatizirati kroz IBC.
+- Ovisno o IBKR security polici, povremena 2FA potvrda i dalje moze biti potrebna.
 
 ## Interaktivna analiza (`analysis.py`)
 

@@ -2,7 +2,7 @@
 
 tws:
   host: "127.0.0.1"
-  port: 7496          # 7497=paper, 7496=live TWS, 4001=IB Gateway live, 4002=IB Gateway paper
+  port: 4001          # 7497=paper TWS, 7496=live TWS, 4001=IB Gateway live, 4002=IB Gateway paper
   client_id: 1
 
 # Symbols file: one ticker per line
